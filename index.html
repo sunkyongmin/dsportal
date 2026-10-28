@@ -72,6 +72,15 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--s
 .panel{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px dashed var(--accent);border-radius:10px;background:var(--surface)}
 .panel p{margin:0;color:var(--muted);font-size:.82rem}
 .actions{display:flex;flex-wrap:wrap;gap:8px}
+.since{font-weight:500;letter-spacing:0;color:var(--muted);margin-left:6px;font-size:.75rem}
+.ward{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.wrow{display:grid;grid-template-columns:11em 1fr;gap:12px;padding:10px 14px;border-top:1px solid var(--line);font-size:.92rem}
+.wrow:first-child{border-top:0}
+.wrow .wk{font-weight:600}
+.wrow.now{background:var(--accent-soft)}
+.wrow.now .wk{color:var(--accent)}
+.shift2{display:block;margin-top:4px;font-size:.78rem;color:var(--muted)}
+@media (max-width:560px){.wrow{grid-template-columns:1fr;gap:2px}}
 footer{color:var(--muted);font-size:.78rem}
 @media (max-width:560px){.edit-row{grid-template-columns:1fr}.clock{text-align:left}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -92,6 +101,7 @@ footer{color:var(--muted);font-size:.78rem}
       <div class="t" id="time">--:--</div>
       <div class="d" id="date"></div>
       <span class="shift" id="shift"></span>
+      <span class="shift2" id="ward"></span>
     </div>
   </header>
 
@@ -113,6 +123,15 @@ footer{color:var(--muted);font-size:.78rem}
     <div class="grid" id="apps"></div>
   </section>
 
+  <section aria-labelledby="h-ward">
+    <h2 id="h-ward">병동콜 안내 <span class="since">2026.10.27(화) 18:00부터</span></h2>
+    <div class="ward">
+      <div class="wrow" id="w-weekday"><span class="wk">평일 (주간·야간)</span><span>병동은 각 과장님께 직접 콜. 외래 없는 오전·오후 포함</span></div>
+      <div class="wrow" id="w-weekend"><span class="wk">토 12:00 – 월 08:00</span><span>주말 병동 당직의 (기존과 같음)</span></div>
+      <div class="wrow" id="w-holiday"><span class="wk">공휴일·토·일 당일 입원</span><span>기존처럼 응급실 당직의에게 콜</span></div>
+    </div>
+  </section>
+
   <section aria-labelledby="h-ext">
     <h2 id="h-ext">외부 바로가기</h2>
     <div class="links">
@@ -126,7 +145,6 @@ footer{color:var(--muted);font-size:.78rem}
   <section aria-labelledby="h-soon">
     <h2 id="h-soon">준비 중</h2>
     <ul class="soon">
-      <li>병동콜 기록 — 호출 시각·병동·사유·소요 시간</li>
       <li>월간 응급실 통계 분석 — 원무 통계표 자동 정리</li>
       <li>다국어 귀가 안내문 — 진단별 주의사항</li>
     </ul>
@@ -187,15 +205,41 @@ document.getElementById('resetBtn').onclick=()=>{document.getElementById('resetC
 document.getElementById('resetYes').onclick=()=>{apps=DEFAULTS.map(a=>({...a}));store(apps);render();renderEdit();document.getElementById('resetConfirm').hidden=true};
 
 const DAYS='일월화수목금토';
+// 공휴일·대체공휴일 (간호사 근무표 앱과 같은 규칙)
+const LUNAR={2026:{s:[2,17],b:[5,24],c:[9,25]},2027:{s:[2,7],b:[5,13],c:[9,15]},2028:{s:[1,27],b:[5,2],c:[10,3]},2029:{s:[2,13],b:[5,20],c:[9,22]},2030:{s:[2,3],b:[5,9],c:[9,12]}};
+const HCACHE={};
+function holidays(y){
+  if(HCACHE[y])return HCACHE[y];
+  const list=[],L=LUNAR[y],set={},seen={},key=x=>(x.getMonth()+1)+'-'+x.getDate();
+  const add=(m,d,k,o)=>list.push({x:new Date(y,m-1,d+(o||0)),k});
+  add(1,1,0);add(3,1,2);add(5,5,2);add(6,6,0);add(8,15,2);add(10,3,2);add(10,9,2);add(12,25,2);
+  if(L){[-1,0,1].forEach(o=>{add(L.s[0],L.s[1],1,o);add(L.c[0],L.c[1],1,o)});add(L.b[0],L.b[1],2)}
+  list.sort((a,b)=>a.x-b.x);list.forEach(h=>set[key(h.x)]=1);
+  list.forEach(h=>{const w=h.x.getDay(),k=key(h.x),need=seen[k]||(h.k===2&&(w===0||w===6))||(h.k===1&&w===0);
+    seen[k]=1;if(!need)return;const x=new Date(h.x);
+    do{x.setDate(x.getDate()+1)}while(x.getDay()===0||x.getDay()===6||set[key(x)]);
+    if(x.getFullYear()===y)set[key(x)]=1});
+  return HCACHE[y]=set;
+}
+const isHoliday=d=>!!holidays(d.getFullYear())[(d.getMonth()+1)+'-'+d.getDate()];
+function wardStatus(n){
+  const w=n.getDay(),h=n.getHours();
+  const weekendDuty=(w===6&&h>=12)||w===0||(w===1&&h<8);
+  const hol=isHoliday(n), offDay=hol||w===0||w===6;
+  if(weekendDuty)return{row:'w-weekend',text:'병동: 주말 당직의 · 당일 입원은 응급실 콜',off:true};
+  if(offDay)return{row:'w-holiday',text:'병동: 각 과장님 직콜 · 당일 입원은 응급실 콜',off:true};
+  return{row:'w-weekday',text:'병동콜 없음 · 각 과장님 직콜',off:false};
+}
 function tick(){
   const n=new Date(),h=n.getHours(),m=n.getMinutes();
   document.getElementById('time').textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  document.getElementById('date').textContent=`${n.getFullYear()}.${n.getMonth()+1}.${n.getDate()} (${DAYS[n.getDay()]})`;
-  const dd=new Date(n.getTime()-8*3600e3).getDay(); // 08시 기준 근무일
-  const wk=dd===0||dd===6, s=document.getElementById('shift');
-  const night=h>=17||h<8;
-  s.textContent=wk?'주말 · 병동 당직 있음':night?'평일 야간 · 병동콜 담당':'평일 주간';
-  s.className='shift'+(night&&!wk?' night':'');
+  document.getElementById('date').textContent=`${n.getFullYear()}.${n.getMonth()+1}.${n.getDate()} (${DAYS[n.getDay()]})${isHoliday(n)?' 공휴일':''}`;
+  const night=h>=17||h<8, ws=wardStatus(n), s=document.getElementById('shift');
+  const wk=n.getDay()===0||n.getDay()===6;
+  s.textContent=isHoliday(n)?'공휴일':wk?'주말':night?'평일 야간':'평일 주간';
+  s.className='shift'+(ws.off?' night':'');
+  document.getElementById('ward').textContent=ws.text;
+  document.querySelectorAll('.wrow').forEach(r=>r.classList.toggle('now',r.id===ws.row));
 }
 render();tick();setInterval(tick,15000);
 </script>
